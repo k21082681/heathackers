@@ -171,9 +171,12 @@ def _residual_key(model_name: str, target: str) -> str:
 # ============================================================================
 # API ENDPOINTS
 # ============================================================================
-@app.get("/")
+from fastapi.responses import RedirectResponse
+
+@app.get("/", include_in_schema=False)
 async def root():
-    return {"status": "PCM ML Server OK", "endpoints": ["/health", "/predict", "/config", "/docs"]}
+    return RedirectResponse(url="/docs")
+
 
 @app.post("/predict", response_model=PredictResponse)
 async def predict(request: PredictRequest):

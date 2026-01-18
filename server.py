@@ -171,6 +171,9 @@ def _residual_key(model_name: str, target: str) -> str:
 # ============================================================================
 # API ENDPOINTS
 # ============================================================================
+@app.get("/")
+async def root():
+    return {"status": "PCM ML Server OK", "endpoints": ["/health", "/predict", "/config", "/docs"]}
 
 @app.post("/predict", response_model=PredictResponse)
 async def predict(request: PredictRequest):

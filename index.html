@@ -424,37 +424,27 @@
     // =========================================================================
     // ML SERVER CONFIGURATION
     // =========================================================================
-    const ML_SERVER = {
-      url: 'http://localhost:8000',
-      endpoint: '/predict',
-      timeout: 5000,
-      online: false,
-      modelName: 'Unknown'
-    };
+  const ML_SERVER = {
+  url: "https://heathackers.onrender.com",
+  endpoint: "/predict",
+  timeout: 5000,
+  online: false,
+  modelName: "RandomForest"
+};
+
 
     let FEATURE_ORDER = null;
 
     async function loadFeatureOrder(){
-      const r = await fetch(`${ML_SERVER.url}/config`);
-      if(!r.ok) throw new Error(`Config HTTP ${r.status}`);
-      const cfg = await r.json();
-      FEATURE_ORDER = cfg.feature_names;
-      return FEATURE_ORDER;
-    }
+    const r = await fetch(`${ML_SERVER.url}/config`);
+    if(!r.ok) throw new Error(`Config HTTP ${r.status}`);
+    const cfg = await r.json();
+    FEATURE_ORDER = cfg.feature_order;   
+    // optional: store model name
+    if(cfg.model_type) ML_SERVER.modelName = cfg.model_type;
+    return FEATURE_ORDER;
+  }
 
-    function normalizeNamedFeatures(named){
-      return { ...named };
-    }
-
-    function buildOrderedArrayFromNamed(named){
-      if(!FEATURE_ORDER) throw new Error("FEATURE_ORDER not loaded");
-      const clean = normalizeNamedFeatures(named);
-      const missing = FEATURE_ORDER.filter(k => clean[k] === undefined || clean[k] === null);
-      if(missing.length){
-        throw new Error(`Missing features: ${missing.join(", ")}`);
-      }
-      return FEATURE_ORDER.map(k => Number(clean[k]));
-    }
 
     // =========================================================================
     // HEXACOSANE CONSTANTS & STATE
@@ -682,13 +672,12 @@
         if(!FEATURE_ORDER) await loadFeatureOrder();
 
         const named = buildFeatureVector();
-        const ordered = buildOrderedArrayFromNamed(named);
 
         const response = await Promise.race([
           fetch(`${ML_SERVER.url}${ML_SERVER.endpoint}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ features: ordered })
+            body: JSON.stringify(named) // ✅ send named features, matches PredictRequest
           }),
           new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), ML_SERVER.timeout))
         ]);
@@ -702,6 +691,7 @@
       }
     }
 
+
     async function checkServerHealth(){
       try {
         const response = await Promise.race([
@@ -712,7 +702,7 @@
         if(response.ok) {
           const data = await response.json();
           ML_SERVER.online = true;
-          ML_SERVER.modelName = data.model_type || 'RandomForest';
+          ML_SERVER.modelName = data.model || 'unknown'; 
           updateServerStatus(true);
           return true;
         }
@@ -823,16 +813,25 @@
     function mergeServerIntoLocal(serverPred){
       const local = edgeModelInferLocal();
       const qb = serverPred.qBands || {};
+
       return {
         ...local,
-        ...serverPred,
-        // normalize fields UI uses
-        latencyMs: serverPred.latency_ms ?? local.latencyMs,
-        p10: qb.p10 ?? local.p10,
-        p50: qb.p50 ?? local.p50,
-        p90: qb.p90 ?? local.p90
+
+        // Only override these if server has them
+        yQ: (serverPred.yQ ?? local.yQ),
+        yTcharge_min: (serverPred.yTcharge_min ?? local.yTcharge_min),
+        x_next: (serverPred.x_next ?? local.x_next),
+        Tout_next: (serverPred.Tout_next ?? local.Tout_next),
+
+        latencyMs: (serverPred.latency_ms ?? local.latencyMs),
+        model_type: (serverPred.model_type ?? local.model_type),
+
+        p10: (qb.p10 ?? local.p10),
+        p50: (qb.p50 ?? local.p50),
+        p90: (qb.p90 ?? local.p90)
       };
     }
+
 
     // =========================================================================
     // RENDER FUNCTIONS

@@ -235,7 +235,7 @@ async def health():
     return {
         "status": "ok",
         "uptime_seconds": time.time() - STARTUP_TIME,
-        "num_features": len(FEATURE_NAMES),
+        "num_features":  0 if FEATURE_NAMES is None else len(FEATURE_NAMES),
         "targets": list(MODELS.keys()),
         "model_type": WINNER or "unknown",
     }

@@ -29,3 +29,4 @@ watchfiles==1.1.1
 websockets==16.0
 wheel==0.45.1
 xgboost==2.0.1
+fastapi

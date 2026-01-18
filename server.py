@@ -112,8 +112,6 @@ async def load_models():
 
     with open(winner_file, "r") as f:
         WINNER = f.read().strip()
-        if WINNER == "rf":
-            WINNER = "Random Forest"
     print(f"✓ Model winner: {WINNER.upper()}")
 
     for target in TARGETS:

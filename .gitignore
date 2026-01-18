@@ -1,23 +1,26 @@
 # Python
 __pycache__/
-*.pyc
+*.py[cod]
 *.pyo
 *.pyd
-*.egg-info/
-dist/
-build/
 
-# Virtual environments
+# Virtual env
 .venv/
 venv/
 env/
 
-# Artifacts / outputs
-*.log
+# OS / editor
 .DS_Store
-
-# Jupyter (if any)
-.ipynb_checkpoints/
+.vscode/
+.idea/
 
 # Secrets
 .env
+.env.*
+
+# Data (if you don't want to publish datasets)
+data/*.csv
+
+# Model artifacts (ONLY ignore if you will re-train on deploy)
+# artifacts/
+# artifacts/models/

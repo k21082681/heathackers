@@ -439,7 +439,7 @@
     const r = await fetch(`${ML_SERVER.url}/config`);
     if(!r.ok) throw new Error(`Config HTTP ${r.status}`);
     const cfg = await r.json();
-    FEATURE_ORDER = cfg.feature_order;   
+    FEATURE_ORDER = cfg.feature_names ?? cfg.feature_order; 
     // optional: store model name
     if(cfg.model_type) ML_SERVER.modelName = cfg.model_type;
     return FEATURE_ORDER;
@@ -702,7 +702,7 @@
         if(response.ok) {
           const data = await response.json();
           ML_SERVER.online = true;
-          ML_SERVER.modelName = data.model || 'unknown'; 
+          ML_SERVER.modelName = data.model_type ?? data.model ?? "unknown";
           updateServerStatus(true);
           return true;
         }

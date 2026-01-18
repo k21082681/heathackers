@@ -1,0 +1,1154 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>PCM Heat Recovery — Monitoring + Edge AI IO (Hexacosane)</title>
+  <style>
+    :root{
+      --bg:#0b1020;
+      --panel:#0f1733;
+      --text:#e9ecff;
+      --muted:#9aa5d6;
+      --line:rgba(255,255,255,.10);
+      --ok:#3cffb2;
+      --warn:#ffd36a;
+      --bad:#ff6a8b;
+      --shadow:0 20px 60px rgba(0,0,0,.35);
+      --radius:16px;
+      --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono","Courier New", monospace;
+      --sans: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial, "Noto Sans", "Apple Color Emoji","Segoe UI Emoji";
+    }
+    *{box-sizing:border-box}
+    html,body{height:100%}
+    body{
+      margin:0;
+      font-family:var(--sans);
+      background: radial-gradient(1200px 700px at 20% 10%, rgba(122,167,255,.18), transparent 60%),
+                  radial-gradient(900px 600px at 80% 20%, rgba(181,139,255,.14), transparent 60%),
+                  radial-gradient(900px 600px at 50% 100%, rgba(60,255,178,.10), transparent 60%),
+                  var(--bg);
+      color:var(--text);
+      line-height:1.35;
+    }
+    .wrap{max-width:1200px;margin:0 auto;padding:28px 18px 60px}
+    .topbar{
+      display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;
+      margin-bottom:18px;
+    }
+    .brand{display:flex;align-items:center;gap:12px}
+    .logo{
+      width:44px;height:44px;border-radius:14px;
+      background: linear-gradient(145deg, rgba(122,167,255,.95), rgba(181,139,255,.85));
+      box-shadow: var(--shadow);
+      position:relative;overflow:hidden;
+    }
+    .logo:before{
+      content:"";
+      position:absolute;inset:-40%;
+      background: radial-gradient(circle at 30% 30%, rgba(255,255,255,.55), transparent 45%),
+                  radial-gradient(circle at 70% 70%, rgba(60,255,178,.35), transparent 55%);
+      transform:rotate(18deg);
+    }
+    h1{margin:0;font-size:18px;letter-spacing:.2px}
+    .subtitle{margin-top:3px;color:var(--muted);font-size:12px}
+    .statusRow{
+      display:flex;gap:10px;align-items:center;flex-wrap:wrap;
+      background: rgba(255,255,255,.04);
+      border:1px solid var(--line);
+      border-radius:999px;
+      padding:10px 12px;
+      box-shadow: 0 10px 30px rgba(0,0,0,.15);
+    }
+    .pill{
+      display:flex;align-items:center;gap:8px;
+      padding:7px 10px;border-radius:999px;
+      border:1px solid var(--line);
+      background: rgba(0,0,0,.18);
+      font-size:12px;color:var(--muted);
+      white-space:nowrap;
+    }
+    .dot{width:8px;height:8px;border-radius:999px;background:var(--ok);box-shadow:0 0 0 4px rgba(60,255,178,.15)}
+    .dot.warn{background:var(--warn);box-shadow:0 0 0 4px rgba(255,211,106,.15)}
+    .dot.bad{background:var(--bad);box-shadow:0 0 0 4px rgba(255,106,139,.16)}
+    .mono{font-family:var(--mono)}
+    .grid{display:grid;grid-template-columns:1.2fr .8fr;gap:14px}
+    @media (max-width:980px){.grid{grid-template-columns:1fr}}
+    .card{
+      border:1px solid var(--line);
+      background: linear-gradient(180deg, rgba(255,255,255,.06), rgba(255,255,255,.03));
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      overflow:hidden;
+    }
+    .cardHead{
+      padding:14px 14px 10px;
+      display:flex;justify-content:space-between;align-items:flex-end;gap:10px;flex-wrap:wrap;
+      border-bottom:1px solid var(--line);
+      background: rgba(0,0,0,.14);
+    }
+    .cardTitle{
+      font-size:13px;color:var(--muted);letter-spacing:.3px;text-transform:uppercase;
+    }
+    .cardBody{padding:14px}
+    .kpis{
+      display:grid;
+      grid-template-columns:repeat(6,1fr);
+      gap:10px;
+    }
+    @media (max-width:1100px){
+      .kpis{grid-template-columns:repeat(3,1fr)}
+    }
+    @media (max-width:560px){
+      .kpis{grid-template-columns:repeat(2,1fr)}
+    }
+    .kpi{
+      border:1px solid var(--line);
+      background: rgba(0,0,0,.16);
+      border-radius:14px;
+      padding:12px;
+      min-height:78px;
+      display:flex;flex-direction:column;justify-content:space-between;
+    }
+    .kpi .label{font-size:12px;color:var(--muted)}
+    .kpi .value{font-size:18px;font-weight:700;letter-spacing:.2px}
+    .kpi .meta{font-size:11px;color:var(--muted);display:flex;justify-content:space-between;gap:8px}
+    .row2{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:14px}
+    @media (max-width:980px){.row2{grid-template-columns:1fr}}
+    .rightCol{display:grid;gap:14px}
+    .ioGrid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+    @media (max-width:980px){.ioGrid{grid-template-columns:1fr}}
+    .tag{
+      display:inline-flex;align-items:center;gap:6px;
+      padding:6px 9px;border-radius:999px;
+      border:1px solid rgba(255,255,255,.10);
+      background: rgba(0,0,0,.18);
+      color:var(--muted);
+      font-size:12px;
+      margin:4px 6px 0 0;
+      white-space:nowrap;
+    }
+    .tag b{color:var(--text);font-weight:700}
+    .barWrap{
+      border:1px solid rgba(255,255,255,.10);
+      background: rgba(0,0,0,.16);
+      border-radius:14px;
+      padding:10px;
+    }
+    .mini{font-size:12px;color:var(--muted)}
+    .kv{
+      display:flex;justify-content:space-between;gap:10px;
+      padding:8px 0;border-bottom:1px dashed rgba(255,255,255,.10);
+      font-size:12px;
+    }
+    .kv:last-child{border-bottom:none}
+    .kv .k{color:var(--muted)}
+    .kv .v{font-family:var(--mono)}
+    .actions{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}
+    .btn{
+      display:flex;align-items:center;justify-content:space-between;gap:10px;
+      padding:10px 12px;
+      border-radius:14px;
+      border:1px solid var(--line);
+      background: rgba(0,0,0,.18);
+      color:var(--text);
+      font-size:12px;
+      cursor:pointer;
+      user-select:none;
+      transition: transform .08s ease, border-color .08s ease, background .08s ease;
+    }
+    .btn:hover{transform: translateY(-1px); border-color: rgba(255,255,255,.16); background: rgba(255,255,255,.04)}
+    .btn small{color:var(--muted)}
+    .split{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+    .bar{
+      height:10px;border-radius:999px;
+      background: rgba(255,255,255,.10);
+      overflow:hidden;
+      position:relative;
+    }
+    .bar > i{
+      display:block;height:100%;
+      width:50%;
+      background: linear-gradient(90deg, rgba(122,167,255,.95), rgba(60,255,178,.85));
+      border-radius:999px;
+    }
+    .barMeta{
+      display:flex;justify-content:space-between;gap:8px;
+      margin-top:8px;
+      font-size:11px;color:var(--muted);
+    }
+    canvas{
+      width:100%;
+      height:180px;
+      display:block;
+      border-radius:14px;
+      border:1px solid rgba(255,255,255,.10);
+      background: rgba(0,0,0,.14);
+    }
+    .footerNote{
+      margin-top:16px;color:rgba(233,236,255,.75);font-size:12px;
+      border:1px dashed rgba(255,255,255,.16);
+      background: rgba(0,0,0,.10);
+      padding:12px 14px;border-radius:14px;
+    }
+    .serverStatus {
+      padding: 10px 12px;
+      border-radius: 8px;
+      border: 1px solid var(--line);
+      background: rgba(0,0,0,.18);
+      font-size: 11px;
+      color: var(--muted);
+    }
+    .serverStatus.offline { background: rgba(255,106,139,.15); border-color: rgba(255,106,139,.3); color: var(--bad); }
+    .serverStatus.online { background: rgba(60,255,178,.15); border-color: rgba(60,255,178,.3); color: var(--ok); }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+
+    <div class="topbar">
+      <div class="brand">
+        <div class="logo" aria-hidden="true"></div>
+        <div>
+          <h1>PCM Heat Recovery — Monitoring + Edge AI IO (Hexacosane)</h1>
+          <div class="subtitle">Sensors → phase-aware state (SoC/melt fraction) → edge outputs → control setpoints → drift feedback</div>
+        </div>
+      </div>
+
+      <div class="statusRow" role="status" aria-live="polite">
+        <div class="pill"><span id="hbDot" class="dot"></span><span class="mono">STREAM</span> <span id="hbText">1s</span></div>
+        <div class="pill"><span class="mono">INFERENCE</span> <span id="latency" class="mono">—</span></div>
+        <div class="pill"><span class="mono">PCM HEALTH</span> <span id="healthLabel" class="mono">—</span></div>
+        <div class="pill"><span class="mono">DRIFT</span> <span id="driftLabel" class="mono">—</span></div>
+        <div id="serverStatusPill" class="serverStatus offline">🔴 Server: Offline</div>
+      </div>
+    </div>
+
+    <div class="grid">
+
+      <!-- LEFT -->
+      <div class="card">
+        <div class="cardHead">
+          <div><div class="cardTitle">Live Monitoring</div></div>
+          <div class="mini">Updated every <span class="mono" id="tick">1.0</span>s • Window: last <span class="mono" id="windowN">120</span> points</div>
+        </div>
+
+        <div class="cardBody">
+          <div class="kpis">
+            <div class="kpi">
+              <div class="label">Charge Rate</div>
+              <div class="value"><span id="chargeRate" class="mono">—</span></div>
+              <div class="meta"><span>kW</span><span id="chargeTrend" class="mono">—</span></div>
+            </div>
+            <div class="kpi">
+              <div class="label">Discharge Rate</div>
+              <div class="value"><span id="dischargeRate" class="mono">—</span></div>
+              <div class="meta"><span>kW</span><span id="dischargeTrend" class="mono">—</span></div>
+            </div>
+            <div class="kpi">
+              <div class="label">Effective UA</div>
+              <div class="value"><span id="ua" class="mono">—</span></div>
+              <div class="meta"><span>W/K</span><span id="uaTrend" class="mono">—</span></div>
+            </div>
+            <div class="kpi">
+              <div class="label">Recovered Heat</div>
+              <div class="value"><span id="recovered" class="mono">—</span></div>
+              <div class="meta"><span>kWh/day</span><span id="recTrend" class="mono">—</span></div>
+            </div>
+            <div class="kpi">
+              <div class="label">Melt Fraction (x)</div>
+              <div class="value"><span id="meltFrac" class="mono">—</span></div>
+              <div class="meta"><span>SoC</span><span id="xTrend" class="mono">—</span></div>
+            </div>
+            <div class="kpi">
+              <div class="label">Energy Remaining</div>
+              <div class="value"><span id="Erem" class="mono">—</span></div>
+              <div class="meta"><span>to x=1</span><span id="EremTrend" class="mono">—</span></div>
+            </div>
+          </div>
+
+          <div class="row2">
+            <div>
+              <div class="mini" style="margin-bottom:8px;">Recovered heat per cycle (trend)</div>
+              <canvas id="chartRecovered" width="900" height="260"></canvas>
+            </div>
+            <div>
+              <div class="mini" style="margin-bottom:8px;">Charge time per cycle (trend)</div>
+              <canvas id="chartChargeTime" width="900" height="260"></canvas>
+            </div>
+          </div>
+
+          <div class="footerNote">
+            <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
+              <span class="tag"><b class="mono">Mode</b> <span id="mode">Charge</span></span>
+              <span class="tag"><b class="mono">Prev</b> <span id="prevMode">—</span></span>
+              <span class="tag"><b class="mono">t_mode</b> <span id="timeInMode" class="mono">—</span>s</span>
+
+              <span class="tag"><b class="mono">T_m</b> <span id="Tm" class="mono">56.6</span>°C</span>
+              <span class="tag"><b class="mono">Plateau</b> <span id="plateau" class="mono">—</span></span>
+              <span class="tag"><b class="mono">k_eff</b> <span id="keff" class="mono">—</span> W/m·K</span>
+
+              <span class="tag"><b class="mono">T_in</b> <span id="Tin" class="mono">—</span>°C</span>
+              <span class="tag"><b class="mono">T_out</b> <span id="Tout" class="mono">—</span>°C</span>
+              <span class="tag"><b class="mono">T_pcm(top)</b> <span id="TpcmTop" class="mono">—</span>°C</span>
+              <span class="tag"><b class="mono">T_pcm(mid)</b> <span id="TpcmMid" class="mono">—</span>°C</span>
+              <span class="tag"><b class="mono">T_pcm(bot)</b> <span id="TpcmBot" class="mono">—</span>°C</span>
+              <span class="tag"><b class="mono">ṁ</b> <span id="flow" class="mono">—</span> kg/s</span>
+              <span class="tag"><b class="mono">ΔP</b> <span id="dp" class="mono">—</span> kPa</span>
+              <span class="tag"><b class="mono">Cycle</b> <span id="cycle" class="mono">—</span></span>
+              <span class="tag"><b class="mono">E_stored</b> <span id="Estored" class="mono">—</span> kWh</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- RIGHT -->
+      <div class="rightCol">
+
+        <div class="card">
+          <div class="cardHead">
+            <div class="cardTitle">Edge Model IO</div>
+            <div class="mini">Model: <span class="mono" id="modelName">Loading...</span></div>
+          </div>
+
+          <div class="cardBody">
+            <div class="ioGrid">
+              <div class="barWrap">
+                <div class="mini" style="margin-bottom:8px;">Inputs (feature vector)</div>
+                <div id="featureTags"></div>
+              </div>
+
+              <div class="barWrap">
+                <div class="mini" style="margin-bottom:8px;">Outputs (real-time)</div>
+                <div class="kv"><span class="k">Ŷ recoverable heat (next window)</span><span id="yQ" class="v">—</span></div>
+                <div class="kv"><span class="k">Ŷ time to x ≥ 0.95</span><span id="yTcharge" class="v">—</span></div>
+                <div class="kv"><span class="k">Ŷ health score</span><span id="yHealth" class="v">—</span></div>
+                <div class="kv"><span class="k">Drift score</span><span id="driftScore" class="v">—</span></div>
+                <div class="kv"><span class="k">Ŷ x_next</span><span id="xNext" class="v">—</span></div>
+                <div class="kv"><span class="k">Ŷ T_out_next</span><span id="ToutNext" class="v">—</span></div>
+                <div class="kv"><span class="k">P10/P50/P90 (ŶQ)</span><span id="qBands" class="v">—</span></div>
+              </div>
+            </div>
+
+            <div style="margin-top:12px" class="split">
+              <div class="barWrap">
+                <div class="mini" style="margin-bottom:8px;">Top drivers (today)</div>
+                <div class="kv"><span class="k">1)</span><span id="imp1" class="v">—</span></div>
+                <div class="kv"><span class="k">2)</span><span id="imp2" class="v">—</span></div>
+                <div class="kv"><span class="k">3)</span><span id="imp3" class="v">—</span></div>
+              </div>
+              <div class="barWrap">
+                <div class="mini" style="margin-bottom:8px;">Data quality</div>
+                <div class="kv"><span class="k">Missing sensors</span><span id="missing" class="v">—</span></div>
+                <div class="kv"><span class="k">Anomaly flag</span><span id="anomaly" class="v">—</span></div>
+                <div class="kv"><span class="k">Residual shift</span><span id="resShift" class="v">—</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="cardHead">
+            <div class="cardTitle">Controller Actions</div>
+            <div class="mini">Model outputs → setpoints</div>
+          </div>
+          <div class="cardBody">
+            <div class="actions">
+              <div class="btn" id="btnMode">
+                <div><div class="mono">Mode</div><small>Charge / Hold / Discharge</small></div>
+                <div class="mono" id="modeBtnVal">Charge</div>
+              </div>
+              <div class="btn" id="btnRoute">
+                <div><div class="mono">Heat Routing</div><small>to storage / bypass</small></div>
+                <div class="mono" id="routeVal">to_storage</div>
+              </div>
+              <div class="btn" id="btnValve">
+                <div><div class="mono">Valve</div><small>position setpoint</small></div>
+                <div class="mono" id="valveVal">—</div>
+              </div>
+              <div class="btn" id="btnPump">
+                <div><div class="mono">Pump</div><small>speed setpoint</small></div>
+                <div class="mono" id="pumpVal">—</div>
+              </div>
+            </div>
+
+            <div style="margin-top:12px" class="split">
+              <div class="barWrap">
+                <div class="mini">Valve setpoint</div>
+                <div class="bar" aria-label="Valve setpoint"><i id="valveBar"></i></div>
+                <div class="barMeta"><span>0%</span><span class="mono" id="valvePct">—</span><span>100%</span></div>
+              </div>
+              <div class="barWrap">
+                <div class="mini">Pump setpoint</div>
+                <div class="bar" aria-label="Pump setpoint"><i id="pumpBar"></i></div>
+                <div class="barMeta"><span>0%</span><span class="mono" id="pumpPct">—</span><span>100%</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="cardHead">
+            <div class="cardTitle">Drift + Lifecycle Feedback</div>
+            <div class="mini">Fast drift (edge) + slow baseline update (lifecycle)</div>
+          </div>
+          <div class="cardBody">
+            <div class="split">
+              <div class="barWrap">
+                <div class="mini" style="margin-bottom:8px;">Drift detection</div>
+                <div class="kv"><span class="k">Detected?</span><span id="driftYesNo" class="v">—</span></div>
+                <div class="kv"><span class="k">Type</span><span id="driftType" class="v">—</span></div>
+                <div class="kv"><span class="k">Recommended</span><span id="driftRec" class="v">—</span></div>
+              </div>
+              <div class="barWrap">
+                <div class="mini" style="margin-bottom:8px;">Lifecycle baseline</div>
+                <div class="kv"><span class="k">RUL estimate</span><span id="rul" class="v">—</span></div>
+                <div class="kv"><span class="k">Baseline UA</span><span id="uaBase" class="v">—</span></div>
+                <div class="kv"><span class="k">Next update</span><span id="nextUpdate" class="v">—</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+    </div>
+  </div>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const clamp = (x,a,b)=>Math.max(a,Math.min(b,x));
+    const fmt = (x, d=2) => (Number.isFinite(x) ? x.toFixed(d) : "—");
+    const pick = (arr)=>arr[Math.floor(Math.random()*arr.length)];
+
+    // =========================================================================
+    // ML SERVER CONFIGURATION
+    // =========================================================================
+    const ML_SERVER = {
+      url: 'http://localhost:8000',
+      endpoint: '/predict',
+      timeout: 5000,
+      online: false,
+      modelName: 'Unknown'
+    };
+
+    let FEATURE_ORDER = null;
+
+    async function loadFeatureOrder(){
+      const r = await fetch(`${ML_SERVER.url}/config`);
+      if(!r.ok) throw new Error(`Config HTTP ${r.status}`);
+      const cfg = await r.json();
+      FEATURE_ORDER = cfg.feature_names;
+      return FEATURE_ORDER;
+    }
+
+    function normalizeNamedFeatures(named){
+      return { ...named };
+    }
+
+    function buildOrderedArrayFromNamed(named){
+      if(!FEATURE_ORDER) throw new Error("FEATURE_ORDER not loaded");
+      const clean = normalizeNamedFeatures(named);
+      const missing = FEATURE_ORDER.filter(k => clean[k] === undefined || clean[k] === null);
+      if(missing.length){
+        throw new Error(`Missing features: ${missing.join(", ")}`);
+      }
+      return FEATURE_ORDER.map(k => Number(clean[k]));
+    }
+
+    // =========================================================================
+    // HEXACOSANE CONSTANTS & STATE
+    // =========================================================================
+    const PCM = {
+      Tm_C: 56.6,
+      L_kJkg: 166.6,
+      Cp_s_kJkgK: 1.80,
+      Cp_l_kJkgK: 2.37,
+      rho_kgm3: 779,
+      k_s: 0.38,
+      k_l: 0.26,
+      Tref_C: 25.0
+    };
+
+    const PCM_VOLUME_M3 = 0.05;
+    const PCM_MASS_KG = PCM_VOLUME_M3 * PCM.rho_kgm3;
+
+    let E_stored_kJ = 0;
+    let lastPrediction = null;
+
+    const N = 120;
+    const bufRecovered = [];
+    const bufChargeTime = [];
+    const bufX = [];
+    const bufErem = [];
+    const WINDOW_SEC = 60;
+
+    const state = {
+      t: 0,
+      dt: 1.0,
+      cycle: 128,
+      mode: "Charge",
+      prevMode: "Charge",
+      timeInMode: 0,
+      route: "to_storage",
+
+      // raw sensors
+      Tin: 52,
+      Tout: 44,
+      flow: 0.42,
+      dp: 7.2,
+
+      TpcmTop: 47,
+      TpcmMid: 47,
+      TpcmBot: 47,
+
+      // monitoring
+      chargeRate: 18,
+      dischargeRate: 14,
+      UA: 980,
+      recoveredDay: 142,
+      chargeTime: 21.5,
+      recPerCycle: 4.2,
+
+      // lifecycle
+      UA_base: 1040,
+      RUL_days: 210,
+
+      // control
+      valve: 62,
+      pump: 58
+    };
+
+    let degradation = 0.0;
+
+    // =========================================================================
+    // PROCESS SIMULATION
+    // =========================================================================
+    function stepProcess(){
+      state.t += state.dt;
+      state.timeInMode += state.dt;
+
+      if(state.t % 60 === 0){
+        state.prevMode = state.mode;
+        state.mode = pick(["Charge","Charge","Charge","Hold","Discharge"]);
+        state.route = (state.mode==="Hold") ? "bypass" : "to_storage";
+        state.timeInMode = 0;
+        state.cycle += 1;
+      }
+
+      degradation += 0.0008 + (Math.random()<0.02 ? 0.01 : 0);
+      degradation = clamp(degradation, 0, 0.85);
+
+      const ambient = 28 + 1.2*Math.sin(state.t/90);
+      const load = 0.6 + 0.25*Math.sin(state.t/40) + 0.08*(Math.random()-0.5);
+
+      state.flow = clamp(0.35 + 0.15*load + 0.03*(Math.random()-0.5), 0.2, 0.75);
+      state.dp = clamp(6.5 + 9.0*degradation + 2.0*(Math.random()-0.5), 4, 22);
+
+      const UA_true = clamp(state.UA_base*(1 - 0.55*degradation) + 30*(Math.random()-0.5), 320, 1200);
+      state.UA = UA_true;
+
+      const heatIn = 55 + 7*load;
+      const effectiveness = clamp((UA_true/1200) * (0.55 + 0.35*(state.flow/0.7)), 0.15, 0.92);
+
+      state.Tin  = clamp(heatIn + 0.7*(Math.random()-0.5), 35, 72);
+      state.Tout = clamp(state.Tin - (6 + 10*effectiveness) + 0.8*(Math.random()-0.5), 20, state.Tin-0.3);
+
+      const targetTop = (state.mode==="Charge") ? (state.Tin - 1.2) :
+                        (state.mode==="Discharge") ? (state.Tout + 2.0) :
+                        ambient;
+
+      const targetBot = (state.mode==="Charge") ? (state.Tin - 3.2) :
+                        (state.mode==="Discharge") ? (state.Tout + 3.0) :
+                        ambient;
+
+      const targetMid = 0.5*(targetTop + targetBot);
+      const strat = 0.10 + 0.06*(Math.random());
+
+      state.TpcmTop = clamp(state.TpcmTop + strat*(targetTop - state.TpcmTop) + 0.10*(Math.random()-0.5), ambient, 65);
+      state.TpcmMid = clamp(state.TpcmMid + (strat*0.9)*(targetMid - state.TpcmMid) + 0.10*(Math.random()-0.5), ambient, 65);
+      state.TpcmBot = clamp(state.TpcmBot + (strat*0.8)*(targetBot - state.TpcmBot) + 0.10*(Math.random()-0.5), ambient, 65);
+
+      const dT = state.Tin - state.Tout;
+      const Qdot = state.flow * 4.18 * dT;
+      const modeSign = (state.mode==="Charge") ? +1 : (state.mode==="Discharge") ? -1 : 0;
+      const Qpcm_kW = modeSign * Qdot * (state.route==="to_storage" ? 1 : 0.15);
+      const Qloss_kW = 0.00008 * E_stored_kJ;
+
+      E_stored_kJ += (Qpcm_kW - Qloss_kW) * state.dt;
+      E_stored_kJ = Math.max(0, E_stored_kJ);
+
+      const Esens_s_kJ = PCM_MASS_KG * PCM.Cp_s_kJkgK * (PCM.Tm_C - PCM.Tref_C);
+      const Efull_kJ = Esens_s_kJ + PCM_MASS_KG * PCM.L_kJkg;
+      E_stored_kJ = clamp(E_stored_kJ, 0, Efull_kJ);
+
+      const chargeBias = (state.mode==="Charge") ? 1 : (state.mode==="Discharge") ? 0.65 : 0.15;
+      state.chargeRate = clamp(Qdot * chargeBias, 0, 40);
+      state.dischargeRate = clamp(Qdot * (state.mode==="Discharge" ? 1 : 0.35), 0, 40);
+
+      state.chargeTime = clamp(18 + 18*degradation + 2.5*(Math.random()-0.5), 12, 60);
+      state.recPerCycle = clamp(5.1*(1 - 0.35*degradation) + 0.6*(Math.random()-0.5), 1.0, 6.0);
+      state.recoveredDay = clamp(120 + 70*(1 - 0.25*degradation) + 8*Math.sin(state.t/75), 60, 220);
+
+      bufRecovered.push(state.recPerCycle);
+      bufChargeTime.push(state.chargeTime);
+      if(bufRecovered.length > N) bufRecovered.shift();
+      if(bufChargeTime.length > N) bufChargeTime.shift();
+
+      let x = (E_stored_kJ - Esens_s_kJ) / (PCM_MASS_KG * PCM.L_kJkg);
+      x = clamp(x, 0, 1);
+
+      const Erem_kJ = PCM_MASS_KG * PCM.L_kJkg * (1 - x);
+      const Erem_kWh = Erem_kJ / 3600;
+
+      bufX.push(x);
+      bufErem.push(Erem_kWh);
+      if(bufX.length > N) bufX.shift();
+      if(bufErem.length > N) bufErem.shift();
+    }
+
+    // =========================================================================
+    // BUILD FEATURE VECTOR (NAMED)
+    // =========================================================================
+    function buildFeatureVector(){
+      const TpcmAvg = (state.TpcmTop + state.TpcmMid + state.TpcmBot) / 3;
+      const dT = state.Tin - state.Tout;
+      const Qdot = state.flow * 4.18 * dT;
+      const modeSign = (state.mode==="Charge") ? +1 : (state.mode==="Discharge") ? -1 : 0;
+      const Qpcm_kW = modeSign * Qdot * (state.route==="to_storage" ? 1 : 0.15);
+
+      const Esens_s_kJ = PCM_MASS_KG * PCM.Cp_s_kJkgK * (PCM.Tm_C - PCM.Tref_C);
+      let x = (E_stored_kJ - Esens_s_kJ) / (PCM_MASS_KG * PCM.L_kJkg);
+      x = clamp(x, 0, 1);
+
+      const Erem_kJ = PCM_MASS_KG * PCM.L_kJkg * (1 - x);
+      const Erem_kWh = Erem_kJ / 3600;
+
+      const plateauFlag = Math.abs(TpcmAvg - PCM.Tm_C) < 0.6 ? 1.0 : 0.0;
+      const keff = x*PCM.k_l + (1-x)*PCM.k_s;
+
+      // NOTE: Qdot_lag* here are still mocky because original sim doesn't store Qdot history.
+      // If you want them physically correct, add a bufQdot[] and use it.
+      const features = {
+        Tin: state.Tin,
+        Tout: state.Tout,
+        mdot: state.flow,
+        dp: state.dp,
+        Tpcm_top: state.TpcmTop,
+        Tpcm_mid: state.TpcmMid,
+        Tpcm_bot: state.TpcmBot,
+        Tpcm_avg: TpcmAvg,
+        dT: dT,
+        Qdot: Qdot,
+        Qpcm_signed: Qpcm_kW,
+        melt_fraction_x: x,
+        Erem_kWh: Erem_kWh,
+        plateauFlag: plateauFlag,
+        keff: keff,
+        mode_charge: (state.mode === "Charge") ? 1.0 : 0.0,
+        mode_discharge: (state.mode === "Discharge") ? 1.0 : 0.0,
+        mode_hold: (state.mode === "Hold") ? 1.0 : 0.0,
+        prevMode_charge: (state.prevMode === "Charge") ? 1.0 : 0.0,
+        prevMode_discharge: (state.prevMode === "Discharge") ? 1.0 : 0.0,
+        prevMode_hold: (state.prevMode === "Hold") ? 1.0 : 0.0,
+        timeInMode: state.timeInMode,
+        valvePct: state.valve,
+        pumpPct: state.pump,
+        bypassFrac: (state.route === "bypass") ? 0.9 : 0.1,
+        Qdot_lag1: bufRecovered.length >= 1 ? bufRecovered[bufRecovered.length-1]*0.5 : 0,
+        Qdot_lag2: bufRecovered.length >= 2 ? bufRecovered[bufRecovered.length-2]*0.5 : 0,
+        Qdot_lag3: bufRecovered.length >= 3 ? bufRecovered[bufRecovered.length-3]*0.5 : 0,
+        melt_fraction_x_lag1: bufX.length >= 1 ? bufX[bufX.length-1] : 0,
+        melt_fraction_x_lag2: bufX.length >= 2 ? bufX[bufX.length-2] : 0,
+        melt_fraction_x_lag3: bufX.length >= 3 ? bufX[bufX.length-3] : 0,
+        Tin_lag1: state.Tin + (Math.random()-0.5)*0.5,
+        Tin_lag2: state.Tin + (Math.random()-0.5)*1.0,
+        Tin_lag3: state.Tin + (Math.random()-0.5)*1.5,
+        TpcmAvg_lag1: TpcmAvg + (Math.random()-0.5)*0.3,
+        TpcmAvg_lag2: TpcmAvg + (Math.random()-0.5)*0.6,
+        TpcmAvg_lag3: TpcmAvg + (Math.random()-0.5)*0.9,
+      };
+
+      return features;
+    }
+
+    // =========================================================================
+    // SERVER CALLS
+    // =========================================================================
+    async function callMLServer(){
+      if(!ML_SERVER.online) return null;
+
+      try {
+        if(!FEATURE_ORDER) await loadFeatureOrder();
+
+        const named = buildFeatureVector();
+        const ordered = buildOrderedArrayFromNamed(named);
+
+        const response = await Promise.race([
+          fetch(`${ML_SERVER.url}${ML_SERVER.endpoint}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ features: ordered })
+          }),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), ML_SERVER.timeout))
+        ]);
+
+        if(!response.ok) throw new Error(`HTTP ${response.status}`);
+        return await response.json();
+
+      } catch(err) {
+        console.warn('ML Server error:', err.message);
+        return null;
+      }
+    }
+
+    async function checkServerHealth(){
+      try {
+        const response = await Promise.race([
+          fetch(`${ML_SERVER.url}/health`),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 2000))
+        ]);
+
+        if(response.ok) {
+          const data = await response.json();
+          ML_SERVER.online = true;
+          ML_SERVER.modelName = data.model_type || 'RandomForest';
+          updateServerStatus(true);
+          return true;
+        }
+      } catch(err) {
+        ML_SERVER.online = false;
+        updateServerStatus(false);
+      }
+      return false;
+    }
+
+    function updateServerStatus(online){
+      const pill = $("serverStatusPill");
+      const modelEl = $("modelName");
+
+      if(online) {
+        pill.className = "serverStatus online";
+        pill.textContent = `🟢 Server: Online (${ML_SERVER.modelName})`;
+        modelEl.textContent = ML_SERVER.modelName;
+      } else {
+        pill.className = "serverStatus offline";
+        pill.textContent = "🔴 Server: Offline (fallback mode)";
+        modelEl.textContent = "Fallback (simulated)";
+      }
+    }
+
+    // =========================================================================
+    // EDGE MODEL FALLBACK (LOCAL)
+    // =========================================================================
+    function edgeModelInferLocal(){
+      const dT = state.Tin - state.Tout;
+      const Qdot = state.flow * 4.18 * dT;
+      const modeSign = (state.mode==="Charge") ? +1 : (state.mode==="Discharge") ? -1 : 0;
+      const Qpcm_kW = modeSign * Qdot * (state.route==="to_storage" ? 1 : 0.15);
+
+      const Esens_s_kJ = PCM_MASS_KG * PCM.Cp_s_kJkgK * (PCM.Tm_C - PCM.Tref_C);
+      let x = (E_stored_kJ - Esens_s_kJ) / (PCM_MASS_KG * PCM.L_kJkg);
+      x = clamp(x, 0, 1);
+
+      const Erem_kJ = PCM_MASS_KG * PCM.L_kJkg * (1 - x);
+      const Erem_kWh = Erem_kJ / 3600;
+
+      const TpcmAvg = (state.TpcmTop + state.TpcmMid + state.TpcmBot) / 3;
+      const plateauFlag = Math.abs(TpcmAvg - PCM.Tm_C) < 0.6;
+      const keff = x*PCM.k_l + (1-x)*PCM.k_s;
+
+      const w = Math.min(60, bufChargeTime.length);
+      const avgChargeTime = bufChargeTime.slice(-w).reduce((a,b)=>a+b,0) / Math.max(1,w);
+      const avgRec = bufRecovered.slice(-w).reduce((a,b)=>a+b,0) / Math.max(1,w);
+
+      const yQ = clamp(0.50*Math.max(Qpcm_kW,0) + 0.75*avgRec + 0.02*(state.UA/10) - 3.8*degradation, 0, 30);
+
+      const target = 0.95;
+      const xGap = Math.max(0, target - x);
+      const chargePower_kW = Math.max(Qpcm_kW, 0.05);
+      const kWhNeeded = (PCM_MASS_KG * PCM.L_kJkg * xGap) / 3600;
+      const yTcharge_min = clamp((kWhNeeded / chargePower_kW) * 60, 0, 240);
+
+      const yHealth = clamp(1.02 - 0.9*degradation - (state.dp-6)/80, 0.05, 0.99);
+
+      const sigma = clamp((1 - yHealth) * 3.0 + (plateauFlag ? 0.8 : 0.2), 0.4, 4.0);
+      const p10 = clamp(yQ - 1.28*sigma, 0, 30);
+      const p50 = yQ;
+      const p90 = clamp(yQ + 1.28*sigma, 0, 30);
+
+      const residualShift = clamp((avgChargeTime - 22)/25 + (state.UA_base - state.UA)/600, -0.4, 1.4);
+      const driftScore = clamp(100*(0.15 + 0.65*degradation + 0.20*clamp(residualShift,0,1)), 0, 100);
+
+      const driftDetected = driftScore > 55;
+      let driftType = "None";
+      if(driftDetected) driftType = (state.dp > 14) ? "Fouling-like" : "Degradation-like";
+
+      let rec = "Normal operation";
+      if(driftScore > 55 && driftScore <= 75) rec = "Self-adjust: soften charge rate";
+      if(driftScore > 75) rec = "Inspect + clean / service soon";
+
+      const dxdt = Qpcm_kW / (PCM_MASS_KG * PCM.L_kJkg);
+      const x_next = clamp(x + dxdt * WINDOW_SEC, 0, 1);
+      const Tout_next = clamp(state.Tout + 0.35*(state.Tin - state.Tout)*(state.route==="to_storage" ? 0.15 : 0.05) + (Math.random()-0.5)*0.3, 10, 80);
+
+      const missing = Math.random() < 0.03 ? 1 : 0;
+      const anomaly = (state.dp > 18 && Math.random()<0.25) || (Math.random()<0.02);
+
+      let valve = clamp(55 + 18*(yQ/30) - 25*(driftScore/100), 10, 95);
+      let pump  = clamp(50 + 20*(yQ/30) - 18*(driftScore/100), 10, 95);
+
+      let mode = state.mode;
+      if(driftScore > 70 && state.mode==="Charge") mode = "Hold";
+      if(yQ < 4 && state.mode==="Charge") mode = "Hold";
+      if(state.mode==="Discharge" && yHealth < 0.25) mode = "Hold";
+      if(x > 0.98 && state.mode==="Charge") mode = "Hold";
+      if(x < 0.05 && state.mode==="Discharge") mode = "Hold";
+
+      const route = (mode==="Hold" || yQ < 3.5) ? "bypass" : "to_storage";
+      const latencyMs = clamp(6 + 22*Math.random() + 40*(1-yHealth), 6, 85);
+
+      return {
+        yQ, yTcharge_min, yHealth, driftScore, driftDetected, driftType, rec,
+        x_next, Tout_next, p10, p50, p90,
+        residualShift, missing, anomaly,
+        valve, pump, mode, route, latencyMs,
+        model_type: "fallback"
+      };
+    }
+
+    // =========================================================================
+    // CRITICAL FIX: MERGE SERVER OUTPUTS INTO LOCAL (SO UI NEVER BREAKS)
+    // =========================================================================
+    function mergeServerIntoLocal(serverPred){
+      const local = edgeModelInferLocal();
+      const qb = serverPred.qBands || {};
+      return {
+        ...local,
+        ...serverPred,
+        // normalize fields UI uses
+        latencyMs: serverPred.latency_ms ?? local.latencyMs,
+        p10: qb.p10 ?? local.p10,
+        p50: qb.p50 ?? local.p50,
+        p90: qb.p90 ?? local.p90
+      };
+    }
+
+    // =========================================================================
+    // RENDER FUNCTIONS
+    // =========================================================================
+    function setHealthStatus(yHealth){
+      const el = $("healthLabel");
+      const hb = $("hbDot");
+      let label = "NORMAL", cls = "dot";
+      if(yHealth < 0.55){ label = "WATCH"; cls = "dot warn"; }
+      if(yHealth < 0.30){ label = "RISK"; cls = "dot bad"; }
+      el.textContent = label + " (" + fmt(yHealth,2) + ")";
+      hb.className = cls;
+    }
+
+    function setDriftStatus(driftScore){
+      const el = $("driftLabel");
+      let label = "LOW";
+      if(driftScore > 55) label = "DETECTED";
+      if(driftScore > 75) label = "HIGH";
+      el.textContent = label + " (" + fmt(driftScore,0) + ")";
+    }
+
+    function pctBar(elBar, elPct, x){
+      const p = clamp(x,0,100);
+      elBar.style.width = p + "%";
+      elPct.textContent = fmt(p,0) + "%";
+    }
+
+    function trendSymbol(series){
+      if(series.length < 6) return "—";
+      const a = series[series.length-1];
+      const b = series[series.length-6];
+      const d = a - b;
+      const s = d > 0.02 ? "↑" : d < -0.02 ? "↓" : "→";
+      return s + " " + fmt(d,2);
+    }
+
+    function drawLineChart(canvas, data){
+      const ctx = canvas.getContext("2d");
+      const w = canvas.width, h = canvas.height;
+      ctx.clearRect(0,0,w,h);
+
+      const pad = 16;
+      const x0 = pad, y0 = pad, x1 = w-pad, y1 = h-pad;
+
+      let min = Infinity, max = -Infinity;
+      for(const v of data){ if(v < min) min = v; if(v > max) max = v; }
+      if(!Number.isFinite(min) || !Number.isFinite(max)){ min = 0; max = 1; }
+      if(max - min < 1e-6){ max = min + 1; }
+      const span = max - min;
+
+      ctx.strokeStyle = "rgba(255,255,255,0.08)";
+      ctx.lineWidth = 1;
+      for(let i=0;i<=4;i++){
+        const y = y0 + (y1-y0)*(i/4);
+        ctx.beginPath(); ctx.moveTo(x0,y); ctx.lineTo(x1,y); ctx.stroke();
+      }
+
+      ctx.strokeStyle = "rgba(122,167,255,0.95)";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      data.forEach((v,i)=>{
+        const x = x0 + (x1-x0)*(i/Math.max(1,data.length-1));
+        const y = y1 - (y1-y0)*((v-min)/span);
+        if(i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+      });
+      ctx.stroke();
+
+      const last = data[data.length-1];
+      const lx = x1;
+      const ly = y1 - (y1-y0)*((last-min)/span);
+      ctx.fillStyle = "rgba(60,255,178,0.95)";
+      ctx.beginPath(); ctx.arc(lx,ly,4,0,Math.PI*2); ctx.fill();
+
+      ctx.fillStyle = "rgba(233,236,255,0.85)";
+      ctx.font = "12px ui-monospace, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace";
+      ctx.fillText(fmt(last,2), lx-54, ly-10);
+    }
+
+    function renderFeatureTags(f){
+      const entries = [
+        ["T_htf_in", fmt(f.Tin,1) + "°C"],
+        ["T_htf_out", fmt(f.Tout,1) + "°C"],
+        ["ṁ", fmt(f.flow,2) + " kg/s"],
+        ["ΔP", fmt(f.dp,1) + " kPa"],
+        ["T_pcm_top", fmt(f.TpcmTop,1) + "°C"],
+        ["T_pcm_mid", fmt(f.TpcmMid,1) + "°C"],
+        ["T_pcm_bot", fmt(f.TpcmBot,1) + "°C"],
+        ["T_pcm_avg", fmt(f.TpcmAvg,1) + "°C"],
+        ["ΔT", fmt(f.dT,1) + "°C"],
+        ["Q̇", fmt(f.Qdot,2) + " kW"],
+        ["Q_pcm (signed)", fmt(f.Qpcm_kW,2) + " kW"],
+        ["x (SoC)", fmt(f.x,2)],
+        ["E_rem", fmt(f.Erem_kWh,2) + " kWh"],
+        ["plateau", f.plateauFlag ? "1" : "0"],
+        ["k_eff", fmt(f.keff,2) + " W/m·K"],
+        ["mode", f.mode],
+        ["prev_mode", f.prevMode],
+        ["t_mode", fmt(f.timeInMode,0) + " s"],
+        ["valve%", fmt(f.valve,0)],
+        ["pump%", fmt(f.pump,0)]
+      ];
+
+      const box = $("featureTags");
+      box.innerHTML = "";
+      for(const [k,v] of entries){
+        const tag = document.createElement("span");
+        tag.className = "tag";
+        tag.innerHTML = `<b class="mono">${k}</b> <span class="mono">${v}</span>`;
+        box.appendChild(tag);
+      }
+    }
+
+    function renderDrivers(f){
+      const candidates = [
+        ["x (SoC)", Math.abs(f.x-0.5)*10],
+        ["Q_pcm", Math.abs(f.Qpcm_kW)],
+        ["ΔT", Math.abs(f.dT)],
+        ["UA", state.UA/80],
+        ["ΔP", f.dp/2],
+        ["plateau", f.plateauFlag ? 2 : 0],
+        ["t_mode", f.timeInMode/30]
+      ].sort((a,b)=>b[1]-a[1]).slice(0,3).map(x=>x[0]);
+
+      $("imp1").textContent = candidates[0] || "—";
+      $("imp2").textContent = candidates[1] || "—";
+      $("imp3").textContent = candidates[2] || "—";
+    }
+
+    function renderAll(){
+      $("tick").textContent = fmt(state.dt,1);
+      $("windowN").textContent = String(N);
+      $("hbText").textContent = state.dt.toFixed(0) + "s";
+
+      $("Tin").textContent = fmt(state.Tin,1);
+      $("Tout").textContent = fmt(state.Tout,1);
+      $("TpcmTop").textContent = fmt(state.TpcmTop,1);
+      $("TpcmMid").textContent = fmt(state.TpcmMid,1);
+      $("TpcmBot").textContent = fmt(state.TpcmBot,1);
+      $("flow").textContent = fmt(state.flow,2);
+      $("dp").textContent = fmt(state.dp,1);
+      $("cycle").textContent = String(state.cycle);
+
+      $("mode").textContent = state.mode;
+      $("prevMode").textContent = state.prevMode;
+      $("timeInMode").textContent = fmt(state.timeInMode,0);
+
+      $("chargeRate").textContent = fmt(state.chargeRate,2);
+      $("dischargeRate").textContent = fmt(state.dischargeRate,2);
+      $("ua").textContent = fmt(state.UA,0);
+      $("recovered").textContent = fmt(state.recoveredDay,0);
+
+      drawLineChart($("chartRecovered"), bufRecovered);
+      drawLineChart($("chartChargeTime"), bufChargeTime);
+
+      // Prediction (server + local merged, or local only)
+      const prediction =
+        (lastPrediction && lastPrediction.model_type && lastPrediction.model_type !== "fallback")
+          ? mergeServerIntoLocal(lastPrediction)
+          : edgeModelInferLocal();
+
+      const TpcmAvg = (state.TpcmTop + state.TpcmMid + state.TpcmBot) / 3;
+      const dT = state.Tin - state.Tout;
+      const Qdot = state.flow * 4.18 * dT;
+      const modeSign = (state.mode==="Charge") ? +1 : (state.mode==="Discharge") ? -1 : 0;
+      const Qpcm_kW = modeSign * Qdot * (state.route==="to_storage" ? 1 : 0.15);
+      const Esens_s_kJ = PCM_MASS_KG * PCM.Cp_s_kJkgK * (PCM.Tm_C - PCM.Tref_C);
+      let x = (E_stored_kJ - Esens_s_kJ) / (PCM_MASS_KG * PCM.L_kJkg);
+      x = clamp(x, 0, 1);
+      const Erem_kJ = PCM_MASS_KG * PCM.L_kJkg * (1 - x);
+      const Erem_kWh = Erem_kJ / 3600;
+      const plateauFlag = Math.abs(TpcmAvg - PCM.Tm_C) < 0.6;
+      const keff = x*PCM.k_l + (1-x)*PCM.k_s;
+
+      const f = {
+        Tin: state.Tin,
+        Tout: state.Tout,
+        flow: state.flow,
+        dp: state.dp,
+        TpcmTop: state.TpcmTop,
+        TpcmMid: state.TpcmMid,
+        TpcmBot: state.TpcmBot,
+        TpcmAvg,
+        dT,
+        Qdot,
+        Qpcm_kW,
+        x,
+        Erem_kWh,
+        plateauFlag,
+        keff,
+        mode: state.mode,
+        prevMode: state.prevMode,
+        timeInMode: state.timeInMode,
+        valve: state.valve,
+        pump: state.pump
+      };
+
+      $("latency").textContent = fmt(prediction.latencyMs,0) + " ms";
+
+      setHealthStatus(prediction.yHealth);
+      setDriftStatus(prediction.driftScore);
+
+      $("plateau").textContent = f.plateauFlag ? "YES" : "NO";
+      $("keff").textContent = fmt(f.keff,2);
+      $("meltFrac").textContent = fmt(f.x,2);
+      $("Erem").textContent = fmt(Erem_kWh,2) + " kWh";
+      $("Estored").textContent = fmt(E_stored_kJ/3600,2);
+
+      $("chargeTrend").textContent = trendSymbol(bufRecovered.map(x=>x*3.3));
+      $("dischargeTrend").textContent = trendSymbol(bufRecovered.map(x=>x*2.7));
+      $("uaTrend").textContent = trendSymbol(bufChargeTime.map(x=>-x));
+      $("recTrend").textContent = trendSymbol(bufRecovered);
+      $("xTrend").textContent = trendSymbol(bufX);
+      $("EremTrend").textContent = trendSymbol(bufErem.map(x=>-x));
+
+      $("yQ").textContent = fmt(prediction.yQ,2) + " kWh";
+      $("yTcharge").textContent = fmt(prediction.yTcharge_min,1) + " min";
+      $("yHealth").textContent = fmt(prediction.yHealth,2);
+      $("driftScore").textContent = fmt(prediction.driftScore,0) + " / 100";
+      $("xNext").textContent = fmt(prediction.x_next,2);
+      $("ToutNext").textContent = fmt(prediction.Tout_next,1) + " °C";
+      $("qBands").textContent = fmt(prediction.p10,2) + " / " + fmt(prediction.p50,2) + " / " + fmt(prediction.p90,2);
+
+      $("driftYesNo").textContent = prediction.driftDetected ? "YES" : "NO";
+      $("driftType").textContent = prediction.driftType;
+      $("driftRec").textContent = prediction.rec;
+
+      $("rul").textContent = fmt(state.RUL_days,0) + " days";
+      $("uaBase").textContent = fmt(state.UA_base,0) + " W/K";
+      $("nextUpdate").textContent = "in " + fmt(24 - (state.t%24),0) + " h";
+
+      $("missing").textContent = prediction.missing ? "1 sensor" : "0 sensors";
+      $("anomaly").textContent = prediction.anomaly ? "TRUE" : "FALSE";
+      $("resShift").textContent = fmt(prediction.residualShift,2);
+
+      renderFeatureTags(f);
+      renderDrivers(f);
+
+      state.valve = prediction.valve;
+      state.pump = prediction.pump;
+
+      if(prediction.mode !== state.mode){
+        state.prevMode = state.mode;
+        state.mode = prediction.mode;
+        state.timeInMode = 0;
+      }
+      state.route = prediction.route;
+
+      $("modeBtnVal").textContent = state.mode;
+      $("routeVal").textContent = state.route;
+      $("valveVal").textContent = fmt(state.valve,0) + "%";
+      $("pumpVal").textContent = fmt(state.pump,0) + "%";
+
+      pctBar($("valveBar"), $("valvePct"), state.valve);
+      pctBar($("pumpBar"), $("pumpPct"), state.pump);
+    }
+
+    // =========================================================================
+    // MAIN LOOP
+    // =========================================================================
+    async function mainLoop(){
+      stepProcess();
+
+      const mlPrediction = await callMLServer();
+      if(mlPrediction) lastPrediction = mlPrediction;
+
+      renderAll();
+    }
+
+    // Manual controls
+    $("btnMode").addEventListener("click", ()=>{
+      const order = ["Charge","Hold","Discharge"];
+      const i = order.indexOf(state.mode);
+      state.prevMode = state.mode;
+      state.mode = order[(i+1)%order.length];
+      state.timeInMode = 0;
+      $("modeBtnVal").textContent = state.mode;
+      $("mode").textContent = state.mode;
+      $("prevMode").textContent = state.prevMode;
+    });
+    $("btnRoute").addEventListener("click", ()=>{
+      state.route = (state.route === "to_storage") ? "bypass" : "to_storage";
+      $("routeVal").textContent = state.route;
+    });
+    $("btnValve").addEventListener("click", ()=>{
+      state.valve = clamp(state.valve + 10, 0, 100);
+      $("valveVal").textContent = fmt(state.valve,0) + "%";
+      pctBar($("valveBar"), $("valvePct"), state.valve);
+    });
+    $("btnPump").addEventListener("click", ()=>{
+      state.pump = clamp(state.pump + 10, 0, 100);
+      $("pumpVal").textContent = fmt(state.pump,0) + "%";
+      pctBar($("pumpBar"), $("pumpPct"), state.pump);
+    });
+
+    // =========================================================================
+    // INITIALIZATION
+    // =========================================================================
+    (async function init(){
+      for(let i=0;i<N;i++){
+        stepProcess();
+        if(bufRecovered.length > N) bufRecovered.shift();
+        if(bufChargeTime.length > N) bufChargeTime.shift();
+        if(bufX.length > N) bufX.shift();
+        if(bufErem.length > N) bufErem.shift();
+      }
+
+      console.log("🚀 Starting PCM Dashboard + Edge AI...");
+      console.log(`📡 Checking ML server at ${ML_SERVER.url}...`);
+      await checkServerHealth();
+
+      renderAll();
+
+      console.log("✅ Dashboard ready. Running inference loop every 1s...");
+      setInterval(mainLoop, 1000);
+    })();
+  </script>
+</body>
+</html>

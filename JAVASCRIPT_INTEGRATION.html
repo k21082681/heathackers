@@ -1,0 +1,411 @@
+<!-- 
+PCM HEAT RECOVERY: HTML INTEGRATION GUIDE
+Complete JavaScript code to integrate edge model predictions into your dashboard.
+This code handles:
+- Sensor state management
+- 1 Hz inference calls to http://localhost:8000/predict
+- DOM updates for yQ, yTcharge, xNext, ToutNext, qBands, latency
+- Error handling and fallbacks
+-->
+
+<!-- ADD THIS TO YOUR HTML (MODIFY YOUR web2.html) -->
+
+<script>
+    /**
+     * EDGE MODEL INFERENCE CLIENT
+     * Manages sensor state and calls FastAPI backend for predictions
+     */
+    
+    // Global sensor state object
+    // Update these values from your sensor data source (WebSocket, REST API, etc.)
+    const sensorState = {
+        // === RAW SENSORS ===
+        Tin: 40.0,              // Inlet temperature [°C]
+        Tout: 35.0,             // Outlet temperature [°C]
+        mdot: 0.5,              // Mass flow rate [kg/s]
+        dp: 5.0,                // Pressure drop [kPa]
+        Tpcm_top: 50.0,         // PCM top sensor [°C]
+        Tpcm_mid: 55.0,         // PCM middle sensor [°C]
+        Tpcm_bot: 52.0,         // PCM bottom sensor [°C]
+        
+        // === DERIVED (COMPUTED CLIENT-SIDE) ===
+        Tpcm_avg: 52.33,        // Average PCM temp [°C]
+        dT: 5.0,                // Inlet - Outlet temp [°C]
+        Qdot: 10.45,            // Heat duty [kW]
+        Qpcm_signed: 8.36,      // Signed PCM heat [kW]
+        
+        // === STATE ESTIMATES ===
+        melt_fraction_x: 0.45,  // Melt fraction [0-1]
+        Erem_kWh: 65.2,         // Energy remaining [kWh]
+        plateauFlag: 0.0,       // Phase-change plateau flag [0-1]
+        keff: 0.32,             // Effective conductivity [W/m·K]
+        
+        // === CONTROL & MODE ===
+        mode: 1.0,              // 1=charge, 0=hold, -1=discharge
+        prevMode: 1.0,          // Previous mode
+        timeInMode: 180.0,      // Seconds in current mode
+        valvePct: 75.0,         // Valve position [0-100%]
+        pumpPct: 85.0,          // Pump speed [0-100%]
+        bypassFrac: 0.15,       // Bypass fraction [0-1]
+        
+        // === LAGS (t-1, t-2, t-3) ===
+        Qdot_lag1: 10.2,
+        Qdot_lag2: 9.8,
+        Qdot_lag3: 9.5,
+        x_lag1: 0.43,
+        x_lag2: 0.41,
+        x_lag3: 0.39,
+        Tin_lag1: 39.8,
+        Tin_lag2: 39.5,
+        Tin_lag3: 39.2,
+        TpcmAvg_lag1: 52.0,
+        TpcmAvg_lag2: 51.5,
+        TpcmAvg_lag3: 51.0,
+        
+        // === ONE-HOT ENCODINGS (DERIVED) ===
+        // These are set by updateModeOneHot()
+        mode_charge: 1.0,
+        mode_hold: 0.0,
+        mode_discharge: 0.0,
+        prevMode_charge: 1.0,
+        prevMode_hold: 0.0,
+        prevMode_discharge: 0.0,
+    };
+    
+    // Configuration
+    const MODEL_CONFIG = {
+        baseUrl: 'http://localhost:8000',
+        inferenceIntervalMs: 1000,  // Call every 1 second
+        timeoutMs: 2000,            // Network timeout
+    };
+    
+    // Global state
+    let lastInferenceTime = 0;
+    let inferenceCount = 0;
+    let errorCount = 0;
+    
+    /**
+     * Update one-hot encoding for mode from scalar value
+     * Called before every inference to ensure mode encodings are current
+     */
+    function updateModeOneHot() {
+        // Current mode encoding
+        sensorState.mode_charge = sensorState.mode === 1.0 ? 1.0 : 0.0;
+        sensorState.mode_hold = sensorState.mode === 0.0 ? 1.0 : 0.0;
+        sensorState.mode_discharge = sensorState.mode === -1.0 ? 1.0 : 0.0;
+        
+        // Previous mode encoding
+        sensorState.prevMode_charge = sensorState.prevMode === 1.0 ? 1.0 : 0.0;
+        sensorState.prevMode_hold = sensorState.prevMode === 0.0 ? 1.0 : 0.0;
+        sensorState.prevMode_discharge = sensorState.prevMode === -1.0 ? 1.0 : 0.0;
+    }
+    
+    /**
+     * Update lag features by shifting previous values
+     * Call this when you have a new timestep of sensor data
+     */
+    function updateLags() {
+        // Shift lags: lag3 ← lag2 ← lag1 ← current
+        sensorState.Qdot_lag3 = sensorState.Qdot_lag2;
+        sensorState.Qdot_lag2 = sensorState.Qdot_lag1;
+        sensorState.Qdot_lag1 = sensorState.Qdot;
+        
+        sensorState.x_lag3 = sensorState.x_lag2;
+        sensorState.x_lag2 = sensorState.x_lag1;
+        sensorState.x_lag1 = sensorState.melt_fraction_x;
+        
+        sensorState.Tin_lag3 = sensorState.Tin_lag2;
+        sensorState.Tin_lag2 = sensorState.Tin_lag1;
+        sensorState.Tin_lag1 = sensorState.Tin;
+        
+        sensorState.TpcmAvg_lag3 = sensorState.TpcmAvg_lag2;
+        sensorState.TpcmAvg_lag2 = sensorState.TpcmAvg_lag1;
+        sensorState.TpcmAvg_lag1 = sensorState.Tpcm_avg;
+    }
+    
+    /**
+     * Update derived features from raw sensors
+     * Should be called after updating raw sensor values
+     */
+    function updateDerivedFeatures() {
+        // PCM average temperature
+        sensorState.Tpcm_avg = (sensorState.Tpcm_top + sensorState.Tpcm_mid + sensorState.Tpcm_bot) / 3.0;
+        
+        // Temperature difference
+        sensorState.dT = sensorState.Tin - sensorState.Tout;
+        
+        // Heat duty [kW] = mdot * Cp * ΔT
+        // Assuming water: Cp = 4.18 kJ/kg·K
+        sensorState.Qdot = sensorState.mdot * 4.18 * sensorState.dT;
+        
+        // Signed PCM heat [kW]
+        sensorState.Qpcm_signed = Math.sign(sensorState.mode) * sensorState.Qdot * (1.0 - sensorState.bypassFrac);
+    }
+    
+    /**
+     * Main inference function
+     * Called every 1 second, sends prediction request to FastAPI server
+     */
+    async function edgeModelInfer() {
+        // Update all derived features and encodings
+        updateModeOneHot();
+        updateDerivedFeatures();
+        
+        const t0 = performance.now();
+        
+        try {
+            // POST request to FastAPI server
+            const response = await fetch(`${MODEL_CONFIG.baseUrl}/predict`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(sensorState),
+            });
+            
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${await response.text()}`);
+            }
+            
+            const result = await response.json();
+            const latency = performance.now() - t0;
+            
+            // === UPDATE DOM WITH PREDICTIONS ===
+            
+            // Recoverable heat [kWh]
+            if (document.getElementById('yQ')) {
+                document.getElementById('yQ').textContent = result.yQ.toFixed(2);
+            }
+            
+            // Time to charge [minutes]
+            if (document.getElementById('yTcharge')) {
+                document.getElementById('yTcharge').textContent = result.yTcharge_min.toFixed(1);
+            }
+            
+            // Melt fraction next step [0-1]
+            if (document.getElementById('xNext')) {
+                document.getElementById('xNext').textContent = result.x_next.toFixed(3);
+            }
+            
+            // Outlet temperature next step [°C]
+            if (document.getElementById('ToutNext')) {
+                document.getElementById('ToutNext').textContent = result.Tout_next.toFixed(1);
+            }
+            
+            // Confidence bands for heat recovery
+            if (document.getElementById('qBands')) {
+                document.getElementById('qBands').textContent = 
+                    `P10: ${result.qBands.p10.toFixed(2)} | ` +
+                    `P50: ${result.qBands.p50.toFixed(2)} | ` +
+                    `P90: ${result.qBands.p90.toFixed(2)}`;
+            }
+            
+            // Inference latency [milliseconds]
+            if (document.getElementById('latency')) {
+                document.getElementById('latency').textContent = latency.toFixed(1) + ' ms';
+            }
+            
+            // Log successful inference
+            inferenceCount++;
+            lastInferenceTime = latency;
+            
+            console.log(`✓ Inference #${inferenceCount}: ${latency.toFixed(1)}ms`, {
+                yQ: result.yQ,
+                yTcharge_min: result.yTcharge_min,
+                x_next: result.x_next,
+                Tout_next: result.Tout_next,
+                confidence: result.confidence,
+                model: result.model_type,
+            });
+            
+        } catch (error) {
+            errorCount++;
+            console.error(`✗ Inference error #${errorCount}:`, error);
+            
+            // Show error in latency element
+            if (document.getElementById('latency')) {
+                if (error.message.includes('Failed to fetch') || error.message.includes('Network')) {
+                    document.getElementById('latency').textContent = 'OFFLINE';
+                    document.getElementById('latency').style.color = 'red';
+                } else {
+                    document.getElementById('latency').textContent = 'ERROR';
+                    document.getElementById('latency').style.color = 'orange';
+                }
+            }
+        }
+        
+        // Schedule next inference
+        setTimeout(edgeModelInfer, MODEL_CONFIG.inferenceIntervalMs);
+    }
+    
+    /**
+     * UPDATE SENSOR VALUES FROM YOUR DATA SOURCE
+     * 
+     * Call this function when you receive new sensor data from:
+     * - WebSocket stream
+     * - REST API polling
+     * - Direct sensor API
+     * 
+     * Example:
+     *   function onWebSocketMessage(data) {
+     *       updateSensors({
+     *           Tin: data.inlet_temperature,
+     *           Tout: data.outlet_temperature,
+     *           mdot: data.mass_flow,
+     *           Tpcm_top: data.pcm_top_temp,
+     *           Tpcm_mid: data.pcm_mid_temp,
+     *           Tpcm_bot: data.pcm_bot_temp,
+     *           mode: data.operating_mode,  // 1, 0, or -1
+     *           valvePct: data.valve_position,
+     *           pumpPct: data.pump_speed,
+     *       });
+     *   }
+     */
+    function updateSensors(newData) {
+        // Update only fields that are provided
+        Object.assign(sensorState, newData);
+        
+        // After updating raw sensors, update lags for next prediction
+        updateLags();
+        
+        console.log('Sensors updated:', newData);
+    }
+    
+    /**
+     * HEALTH CHECK
+     * Call once on page load to verify server is running
+     */
+    async function checkServerHealth() {
+        try {
+            const response = await fetch(`${MODEL_CONFIG.baseUrl}/health`);
+            if (response.ok) {
+                const health = await response.json();
+                console.log('✓ Edge Model Server is online:', health);
+                return true;
+            }
+        } catch (e) {
+            console.warn('⚠ Edge Model Server is offline. Check that server.py is running on localhost:8000');
+            return false;
+        }
+    }
+    
+    /**
+     * GET MODEL CONFIGURATION
+     * Call to fetch feature list, residual stds, and model info
+     */
+    async function getModelConfig() {
+        try {
+            const response = await fetch(`${MODEL_CONFIG.baseUrl}/config`);
+            if (response.ok) {
+                const config = await response.json();
+                console.log('Edge Model Config:', config);
+                return config;
+            }
+        } catch (e) {
+            console.error('Failed to fetch model config:', e);
+            return null;
+        }
+    }
+    
+    // ========================================================================
+    // START INFERENCE ON PAGE LOAD
+    // ========================================================================
+    
+    document.addEventListener('DOMContentLoaded', async function() {
+        console.log('PCM Edge Model: Initializing...');
+        
+        // Check server health
+        const serverOk = await checkServerHealth();
+        if (!serverOk) {
+            console.error('Cannot start inference: server not reachable');
+            if (document.getElementById('latency')) {
+                document.getElementById('latency').textContent = 'OFFLINE';
+                document.getElementById('latency').style.color = 'red';
+            }
+            return;
+        }
+        
+        // Fetch model config
+        const config = await getModelConfig();
+        if (!config) {
+            console.warn('Could not fetch model config, proceeding with defaults...');
+        }
+        
+        // Start inference loop
+        console.log('Starting inference loop (1 Hz)...');
+        edgeModelInfer();  // First call
+        
+        // Log status every 30 seconds
+        setInterval(() => {
+            console.log(`PCM Edge Model Status: ${inferenceCount} inferences, ${errorCount} errors, last latency: ${lastInferenceTime.toFixed(1)}ms`);
+        }, 30000);
+    });
+    
+    // ========================================================================
+    // EXAMPLE: SIMULATE SENSOR UPDATES (REMOVE THIS IN PRODUCTION)
+    // ========================================================================
+    
+    // Uncomment to test without real sensors:
+    /*
+    document.addEventListener('DOMContentLoaded', function() {
+        // Simulate sensor updates every 2 seconds
+        setInterval(() => {
+            // Simulate slow charge cycle
+            const t = Date.now() / 1000;
+            const cycle = (t % 120) / 120;  // 2-minute cycle
+            
+            updateSensors({
+                Tin: 35.0 + 10.0 * Math.sin(2 * Math.PI * cycle),
+                mdot: 0.3 + 0.2 * Math.sin(2 * Math.PI * cycle),
+                mode: cycle < 0.5 ? 1.0 : -1.0,  // Charge then discharge
+                Tpcm_mid: 40.0 + 15.0 * Math.sin(2 * Math.PI * cycle),
+                melt_fraction_x: Math.max(0, Math.sin(2 * Math.PI * cycle)),
+            });
+        }, 2000);
+    });
+    */
+    
+</script>
+
+<!-- 
+REQUIRED DOM ELEMENTS IN YOUR HTML
+Make sure these elements exist in your dashboard:
+-->
+
+<!--
+EXAMPLE PLACEMENT IN YOUR DASHBOARD:
+
+<div id="edge-model-outputs">
+    <h3>Edge Model Predictions</h3>
+    
+    <div>
+        <label>Recoverable Heat (next window)</label>
+        <span id="yQ">-</span> kWh
+    </div>
+    
+    <div>
+        <label>Time to x ≥ 0.95</label>
+        <span id="yTcharge">-</span> minutes
+    </div>
+    
+    <div>
+        <label>Melt Fraction (next step)</label>
+        <span id="xNext">-</span>
+    </div>
+    
+    <div>
+        <label>Outlet Temp (next step)</label>
+        <span id="ToutNext">-</span> °C
+    </div>
+    
+    <div>
+        <label>Heat Recovery Bands (P10/P50/P90)</label>
+        <span id="qBands">-</span> kWh
+    </div>
+    
+    <div>
+        <label>Inference Latency</label>
+        <span id="latency">-</span> ms
+    </div>
+</div>
+-->

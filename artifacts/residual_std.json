@@ -1,0 +1,10 @@
+{
+  "xgb_yQ_kWh_next_window": 0.03422575949287651,
+  "rf_yQ_kWh_next_window": 0.04018541558362571,
+  "xgb_time_to_x95_min": 0.0,
+  "rf_time_to_x95_min": 0.0,
+  "xgb_x_next": 0.00827929109290109,
+  "rf_x_next": 0.008831523933403765,
+  "xgb_Tout_next": 0.6549828081138127,
+  "rf_Tout_next": 0.6062668840026506
+}

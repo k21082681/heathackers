@@ -172,10 +172,14 @@ def _residual_key(model_name: str, target: str) -> str:
 # API ENDPOINTS
 # ============================================================================
 from fastapi.responses import RedirectResponse
+from fastapi import FastAPI
 
-@app.get("/", include_in_schema=False)
-async def root():
-    return RedirectResponse(url="/docs")
+app = FastAPI()
+
+@app.get("/")
+def root():
+    return FileResponse("index.html")
+
 
 
 @app.post("/predict", response_model=PredictResponse)

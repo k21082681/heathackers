@@ -201,9 +201,121 @@
     }
     .serverStatus.offline { background: rgba(255,106,139,.15); border-color: rgba(255,106,139,.3); color: var(--bad); }
     .serverStatus.online { background: rgba(60,255,178,.15); border-color: rgba(60,255,178,.3); color: var(--ok); }
+  /* Countdown notification bar at top */
+.countdown-notification-bar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    background: linear-gradient(135deg, #ff4444, #cc0000);
+    color: white;
+    padding: 15px 20px;
+    box-shadow: 0 4px 20px rgba(255, 68, 68, 0.8);
+    z-index: 2000;
+    display: none;
+    align-items: center;
+    justify-content: space-between;
+    animation: slideDown 0.5s ease-out, barPulse 1s ease-in-out 0.5s infinite;
+}
+
+.countdown-notification-bar.active { display: flex; }
+
+@keyframes slideDown {
+    from { transform: translateY(-100%); opacity: 0; }
+    to { transform: translateY(0); opacity: 1; }
+}
+
+@keyframes barPulse {
+    0%, 100% { box-shadow: 0 4px 20px rgba(255, 68, 68, 0.8); }
+    50% { box-shadow: 0 4px 30px rgba(255, 68, 68, 1); }
+}
+
+.countdown-bar-content {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    flex: 1;
+}
+
+.countdown-bar-icon {
+    font-size: 2em;
+    animation: iconShake 0.5s ease-in-out infinite;
+}
+
+@keyframes iconShake {
+    0%, 100% { transform: rotate(0deg); }
+    25% { transform: rotate(-10deg); }
+    75% { transform: rotate(10deg); }
+}
+
+.countdown-bar-text { flex: 1; }
+
+.countdown-bar-text strong {
+    display: block;
+    font-size: 1.2em;
+    margin-bottom: 5px;
+}
+
+.countdown-bar-timer {
+    font-size: 2.5em;
+    font-weight: bold;
+    font-family: 'Courier New', monospace;
+    min-width: 80px;
+    text-align: center;
+}
+
+.countdown-bar-actions {
+    display: flex;
+    gap: 10px;
+}
+
+.countdown-bar-actions button {
+    padding: 10px 20px;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+    font-weight: 600;
+    transition: all 0.2s;
+}
+
+.btn-bar-acknowledge {
+    background: #00ff88;
+    color: #000;
+}
+
+.btn-bar-acknowledge:hover {
+    background: #00cc66;
+    transform: scale(1.05);
+}
+
+.btn-bar-shutdown {
+    background: white;
+    color: #ff4444;
+}
+
+.btn-bar-shutdown:hover {
+    background: #f0f0f0;
+    transform: scale(1.05);
+}
+
   </style>
 </head>
 <body>
+    <!-- Countdown Notification Bar -->
+  <div class="countdown-notification-bar" id="countdownBar">
+    <div class="countdown-bar-content">
+        <div class="countdown-bar-icon">⚠️</div>
+        <div class="countdown-bar-text">
+            <strong>CRITICAL SYSTEM WARNING</strong>
+            <span>Emergency shutdown required if conditions do not improve</span>
+        </div>
+        <div class="countdown-bar-timer" id="countdownBarTimer">30</div>
+    </div>
+    <div class="countdown-bar-actions">
+        <button class="btn-bar-acknowledge" onclick="acknowledgeWarning()">✓ I Acknowledge</button>
+        <button class="btn-bar-shutdown" onclick="shutdownFromCountdown()">🛑 Shutdown Now</button>
+    </div>
+  </div>
   <div class="wrap">
 
     <div class="topbar">
@@ -910,6 +1022,77 @@
       ctx.font = "12px ui-monospace, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace";
       ctx.fillText(fmt(last,2), lx-54, ly-10);
     }
+    let countdownInterval = null;
+    async function performSafetyCheck() {
+    try {
+        const features = getCurrentFeatures();
+        const response = await fetch(`${API_BASE}/safety_check`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ features })
+        });
+        
+        const data = await response.json();
+        updateSafetyUI(data);
+        handleCountdown(data);  // ← ADD THIS LINE
+    } catch (error) {
+        console.error('Safety check failed:', error);
+    }
+}
+
+function handleCountdown(data) {
+    const bar = document.getElementById('countdownBar');
+    const timer = document.getElementById('countdownBarTimer');
+    
+    if (data.critical_countdown_active && data.critical_countdown_remaining !== null) {
+        bar.classList.add('active');
+        timer.textContent = data.critical_countdown_remaining;
+        
+        if (countdownInterval) clearInterval(countdownInterval);
+        
+        countdownInterval = setInterval(() => {
+            performSafetyCheck();
+        }, 1000);
+        
+        if (data.critical_countdown_remaining === 0) {
+            clearInterval(countdownInterval);
+            initiateEmergencyShutdown();
+        }
+    } else {
+        bar.classList.remove('active');
+        if (countdownInterval) {
+            clearInterval(countdownInterval);
+            countdownInterval = null;
+        }
+    }
+}
+
+async function acknowledgeWarning() {
+    try {
+        await fetch(`${API_BASE}/acknowledge_critical`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ acknowledged: true })
+        });
+        document.getElementById('countdownBar').classList.remove('active');
+        if (countdownInterval) {
+            clearInterval(countdownInterval);
+            countdownInterval = null;
+        }
+    } catch (error) {
+        console.error('Failed to acknowledge:', error);
+    }
+}
+
+  function shutdownFromCountdown() {
+      document.getElementById('countdownBar').classList.remove('active');
+      if (countdownInterval) {
+          clearInterval(countdownInterval);
+          countdownInterval = null;
+      }
+      initiateEmergencyShutdown();
+  }
+
 
     function renderFeatureTags(f){
       const entries = [
@@ -1147,6 +1330,8 @@
 
       console.log("✅ Dashboard ready. Running inference loop every 1s...");
       setInterval(mainLoop, 1000);
+      document.getElementById('countdownBar').classList.add('active');
+
     })();
   </script>
 </body>

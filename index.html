@@ -1310,6 +1310,27 @@ async function acknowledgeWarning() {
       pctBar($("pumpBar"), $("pumpPct"), state.pump);
     });
 
+    // Call this once after the page loads
+  function showTestCountdown() {
+    const bar   = document.getElementById('countdownBar');
+    const timer = document.getElementById('countdownBarTimer');
+
+    bar.classList.add('active');          // show the red bar
+    let t = 30;
+    timer.textContent = t;                // starting value
+
+    const testInt = setInterval(() => {
+      t -= 1;
+      timer.textContent = t;
+      if (t <= 0) {
+        clearInterval(testInt);
+        // optionally hide it:
+        // bar.classList.remove('active');
+      }
+    }, 1000);
+  }
+
+
     // =========================================================================
     // INITIALIZATION
     // =========================================================================
@@ -1331,6 +1352,7 @@ async function acknowledgeWarning() {
       console.log("✅ Dashboard ready. Running inference loop every 1s...");
       setInterval(mainLoop, 1000);
       document.getElementById('countdownBar').classList.add('active');
+      showTestCountdown();
 
     })();
   </script>

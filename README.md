@@ -15,6 +15,9 @@ Team: HeatHackers
 - Maryam AlQaed
 - Raneem Alolayan
 
+  ![WhatsApp Image 2026-02-09 at 8 27 27 PM](https://github.com/user-attachments/assets/2b37051d-8248-4bb9-9b98-6606b3b2aea5)
+
+
 Challenge: Reduce energy loss in thermal storage systems via predictive ML
 
 📁 File Structure & Description
